@@ -459,6 +459,5 @@ app.all('*', (req, res) => {
 
 // ✅ 6. App Listen - Vercel Serverless Functions में यह इग्नोर हो जाएगा
 const port = process.env.PORT || 3000;
-app.listen(port, '0.0.0.0', () => { // '0.0.0.0' लोकल मशीन पर सभी इंटरफेस पर सुनता है
-    console.log(`Example app listening on port ${port}`);
-});
+// IMPORTANT: no app.listen()
+module.exports = app;
