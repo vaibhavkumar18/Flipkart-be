@@ -1,58 +1,57 @@
-const { MongoClient } = require('mongodb');
+const { MongoClient, ObjectId } = require("mongodb");
 const express = require('express'); // Express framework
 const bodyParser = require('body-parser'); // JSON body parsing middleware
 const dotenv = require('dotenv'); // For environment variables
 const cors = require('cors'); // For Cross-Origin Resource Sharing
 const path = require('path'); // Node.js built-in module for path manipulation
+const jwt = require("jsonwebtoken");
+const bcrypt = require("bcrypt");
+const authMiddleware = require("./middleware/auth");
+const cookieParser = require("cookie-parser");
 
-// ✅ 1. dotenv.config() को तुरंत कॉल करें ताकि ENV वेरिएबल्स लोड हो जाएं
+const isProd = process.env.NODE_ENV === "production";
+
+const cookieOptions = {
+    httpOnly: true,
+    secure: isProd,              // true in prod, false local
+    sameSite: isProd ? "none" : "lax",
+    maxAge: 7 * 24 * 60 * 60 * 1000
+};
+
+
 dotenv.config();
 
-// 2. कनेक्शन URL को environment variable से लें
-// सुनिश्चित करें कि आपके Vercel Environment Variables में MONGO_URI सेट है।
+
 const url = process.env.MONGO_URI;
 
-// अगर MONGO_URI सेट नहीं है तो तुरंत एरर दें और एग्जिट करें
+
 if (!url) {
     console.error("❌ Error: MONGO_URI environment variable is not set. Please set it in your .env file or Vercel settings.");
-    process.exit(1); // प्रोसेस को तुरंत बंद करें
+    process.exit(1); // 
 }
 
-const client = new MongoClient(url); // MongoDB क्लाइंट इंस्टेंस
+const client = new MongoClient(url);
 
-// Database Name (यह आपकी कनेक्शन स्ट्रिंग में भी हो सकता है)
-const dbName = 'Ecommerce'; // आप इसे अपनी URI से भी parse कर सकते हैं या यहाँ hardcode कर सकते हैं
 
-const app = express(); // Express एप्लीकेशन इनिशियलाइज़ करें
+const dbName = 'Ecommerce';
+
+const app = express();
 
 // Middlewares
-app.use(bodyParser.json()); // JSON रिक्वेस्ट बॉडी को पार्स करें
+app.use(bodyParser.json());
 app.use(cors({
-    origin: '*', // For development, you can use '*'
-    // Production में, आपको इसे अपने फ़्रंटएंड URL से बदलना चाहिए, उदा: 'https://your-frontend-app.vercel.app'
-    credentials: true, // अगर आप कुकीज़ या ऑथराइजेशन हेडर भेज रहे हैं
+    origin: process.env.FRONTEND_URL,
+    credentials: true
 }));
 
-// ✅ 3. Static फ़ाइलों के लिए (अगर आप 'public' फ़ोल्डर से फ़ाइलें सर्व कर रहे हैं)
-// Vercel Serverless Functions में static फ़ाइलें आमतौर पर अलग से हैंडल होती हैं,
-// लेकिन लोकल डेवलपमेंट या कुछ खास Serverless configs के लिए यह ठीक है।
+app.use(cookieParser());
 app.use('/static', express.static(path.join(__dirname, 'public')));
-app.use(express.json()); // body-parser.json() के बाद यह redundant है अगर सिर्फ JSON है
+app.use(express.json());
 module.exports = app;
-// ✅ 4. डेटाबेस कनेक्शन फ़ंक्शन
-// इसे 'middleware' या 'route handler' के रूप में न रखें।
-// इसे एक बार इनिशियलाइज़ेशन के रूप में कॉल करें।
 async function connectToMongo() {
     try {
         await client.connect();
         console.log("✅ Connected to MongoDB!");
-
-        // MongoDB client को app.locals में स्टोर कर सकते हैं ताकि रूट्स इसे एक्सेस कर सकें
-        // या सीधे client वेरिएबल का उपयोग कर सकते हैं अगर वह global scope में है।
-        // app.locals.db = client.db(dbName);
-
-        // ✅ Vercel Serverless Functions के लिए, app.listen() की आवश्यकता नहीं है
-        // लोकल डेवलपमेंट के लिए आप इसे यहाँ रख सकते हैं:
         if (process.env.NODE_ENV !== 'production') { // Check if not in production
             app.listen(3000, () => {
                 console.log("🚀 Local Server running on port 3000");
@@ -61,46 +60,44 @@ async function connectToMongo() {
 
     } catch (e) {
         console.error("❌ Failed to connect to MongoDB:", e);
-        process.exit(1); // कनेक्शन फेल होने पर प्रोसेस को बंद करें
+        process.exit(1);
     }
 }
-
-// ✅ 5. MongoDB से कनेक्ट करें
 connectToMongo();
 
 
 // ✅ This route returns the full user object by username
-app.get('/api/user/profile/:username', async (req, res) => {
+app.get("/api/user/profile", authMiddleware, async (req, res) => {
     const db = client.db(dbName);
-    const collection = db.collection('Userdata');
-    const { username } = req.params;
-    console.log("Fetching user profile for:", username);
-    try {
-        const user = await collection.findOne({ Username: username });
-        console.log("Full user data in user profile ", user);
-        if (!user) {
-            return res.status(404).json({ success: false, message: "User not found" });
-        }
-        const userProfileToSend = {
-            _id: user._id ? user._id.toString() : null,
-            Username: user.Username || "",
-            Name: user.Name || "",
-            Email: user.Email || "",
-            Gender: user.Gender || "",
-            Address: user.Address || "",
-            Phone_Number: user.Phone_Number || "",
-            id: user.id || "",
-            addToCart: user.addToCart || [],
-            Orders: user.Orders || []
-        };
-        console.log("after filtering user data in profile", userProfileToSend)
-        res.json(userProfileToSend); //
+    const collection = db.collection("Userdata");
 
-    } catch (err) {
-        console.error("Error fetching user:", err);
-        res.status(500).json({ success: false, message: "Internal server error" });
+    try {
+        const user = await collection.findOne(
+            { _id: new ObjectId(req.user.id) },
+            { projection: { Password: 0 } }
+        );
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
+
+        return res.json({
+            success: true,
+            user
+        });
+    } catch (error) {
+        console.error("Profile fetch error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error"
+        });
     }
 });
+
+
 
 app.get('/', async (req, res) => {
     const db = client.db(dbName);
@@ -117,7 +114,7 @@ app.post('/', async (req, res) => {
     res.send({ success: true, result: findResult })
 })
 
-app.post("/add-To-Cart", async (req, res) => {
+app.post("/add-To-Cart", authMiddleware, async (req, res) => {
     const db = client.db(dbName);
     const collection = db.collection("Userdata");
     const { username, productId, name, price, productImg, quantity } = req.body;
@@ -134,7 +131,7 @@ app.post("/add-To-Cart", async (req, res) => {
 
 });
 
-app.get("/CartPage/:Username", async (req, res) => {
+app.get("/CartPage/:Username", authMiddleware, async (req, res) => {
     const db = client.db(dbName);
     const collection = db.collection("Userdata");
     const user = await collection.findOne({ Username: req.params.Username });
@@ -176,68 +173,155 @@ app.post("/EmptyCart", async (req, res) => {
     }
 });
 
-app.post('/login', async (req, res) => {
+app.post("/login", async (req, res) => {
     const { email, password } = req.body;
     const db = client.db(dbName);
-    const collection = db.collection('Userdata');
+    const collection = db.collection("Userdata");
 
     try {
-        const user = await collection.findOne({ Email: email, Password: password });
+        // 1. Find user by email ONLY
+        const user = await collection.findOne({ Email: email });
 
-        if (user) {
-            console.log("Full user object from MongoDB (before processing):", user); // Debugging line
-
-            // ✅ user._id को string में बदलें
-            // ✅ user ऑब्जेक्ट से केवल आवश्यक फ़ील्ड्स को एक नए ऑब्जेक्ट में मैप करें
-            const userToSend = {
-                _id: user._id.toString(), // ObjectId को string में बदलें
-                Username: user.Username,
-                Name: user.Name,
-                Email: user.Email,
-                // Password: user.Password, // ❌ सुरक्षा कारणों से पासवर्ड न भेजें
-                Gender: user.Gender,
-                Address: user.Address,       // यह एक array है, सीधे भेजें
-                Phone_Number: user.Phone_Number,
-                id: user.id,                 // यह एक string id है, सीधे भेजें
-                addToCart: user.addToCart,   // यह एक array है, सीधे भेजें
-                Orders: user.Orders          // यह एक array है, सीधे भेजें
-            };
-
-            const dataToSend = { success: true, user: userToSend };
-
-            // ✅ सबसे महत्वपूर्ण बदलाव: res.json() को सीधे JavaScript ऑब्जेक्ट पास करें
-            // इसे मैन्युअल रूप से JSON.stringify() न करें
-            console.log("Login success response (object to be sent as JSON):", dataToSend);
-            return res.json(dataToSend); // Express इसे अपने आप JSON stringify करेगा
-        } else {
-            // गलत क्रेडेंशियल के लिए
-            return res.status(401).json({ success: false, message: "Invalid credentials" });
+        if (!user) {
+            return res.status(401).json({
+                success: false,
+                message: "Invalid credentials"
+            });
         }
+
+        // 2. Compare password with bcrypt
+        const isPasswordMatch = await bcrypt.compare(password, user.Password);
+
+        if (!isPasswordMatch) {
+            return res.status(401).json({
+                success: false,
+                message: "Invalid credentials"
+            });
+        }
+
+        // 3. Generate JWT
+        const token = jwt.sign(
+            { id: user._id, Email: user.Email },
+            process.env.JWT_SECRET,
+            { expiresIn: "7d" }
+        );
+
+        // 4. Send safe user object
+        const userToSend = {
+            _id: user._id.toString(),
+            Username: user.Username,
+            Name: user.Name,
+            Email: user.Email,
+            Gender: user.Gender,
+            Address: user.Address,
+            Phone_Number: user.Phone_Number,
+            addToCart: user.addToCart,
+            Orders: user.Orders
+        };
+
+        res.cookie("token", token, cookieOptions);
+
+
+        return res.status(200).json({
+            success: true,
+            user: userToSend
+        });
+
+
     } catch (error) {
-        // किसी भी सर्वर-साइड त्रुटि को पकड़ें
-        console.error("Error during login request:", error);
-        return res.status(500).json({ success: false, message: "Internal Server Error" });
+        console.error("Error during login:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Internal Server Error"
+        });
     }
 });
 
-app.post('/signup', async (req, res) => {
-    const db = client.db(dbName);
-    const collection = db.collection('Userdata');
-    const { Username, Name, Email, Password, Gender, Address, Phone_Number, id, addToCart, Orders } = req.body;
-    const Usersdata = { Username, Name, Email, Password, Gender, Address, Phone_Number, id, addToCart, Orders };
-    console.log("Usersdata in js", Usersdata)
-    const user = await collection.findOne({ Email: Email });
-    if (user) {
-        console.log("This email already exist!!!")
-        return res.send({ success: false, message: "Email already exists" });
-    } else {
+
+app.post("/signup", async (req, res) => {
+    try {
+        const db = client.db(dbName);
+        const collection = db.collection("Userdata");
+
+        const {
+            Username,
+            Name,
+            Email,
+            Password,
+            Gender,
+            Address,
+            Phone_Number,
+            addToCart = [],
+            Orders = []
+        } = req.body;
+
+        // 1. Check existing user
+        const existingUser = await collection.findOne({ Email });
+        if (existingUser) {
+            return res.status(409).json({
+                success: false,
+                message: "Email already exists"
+            });
+        }
+
+        // 2. Hash password
+        const hashedPassword = await bcrypt.hash(Password, 10);
+
+        // 3. Create user object
+        const Usersdata = {
+            Username,
+            Name,
+            Email,
+            Password: hashedPassword,
+            Gender,
+            Address,
+            Phone_Number,
+            addToCart,
+            Orders,
+            createdAt: new Date()
+        };
+
+        // 4. Insert user
         const result = await collection.insertOne(Usersdata);
-        console.log("result", result)
-        return res.send({ success: true, message: "Signup successful", data: result });
+
+        // after insert
+        const userToSend = {
+            _id: result.insertedId.toString(),
+            Username,
+            Name,
+            Email,
+            Gender,
+            Address,
+            Phone_Number,
+            addToCart,
+            Orders
+        };
+        // 5. Generate JWT
+        const token = jwt.sign(
+            { id: result.insertedId, Email },
+            process.env.JWT_SECRET,
+            { expiresIn: "7d" }
+        );
+
+        res.cookie("token", token, cookieOptions);
+
+        return res.status(201).json({
+            success: true,
+            user: userToSend
+        });
+
+
+    } catch (error) {
+        console.error("Signup error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Server error"
+        });
     }
 });
 
-app.post('/my-profile', async (req, res) => {
+
+app.post('/my-profile', authMiddleware, async (req, res) => {
     const db = client.db(dbName);
     const collection = db.collection('Userdata');
     const { Username, Name, Email, Password, id, addToCart } = req.body;
@@ -255,7 +339,7 @@ app.post('/my-profile', async (req, res) => {
 });
 
 // request for data to order
-app.post("/Order", async (req, res) => {
+app.post("/Order", authMiddleware, async (req, res) => {
     const db = client.db(dbName);
     const collection = db.collection("Userdata");
     const { username, OrderId, Address, TotalAmount, ProductData, Name, Email, Phone_number, BaseAmount, CashHandlingCharge, DeliveryCharge, Tax, DeliveredDate, OrderedDate, CancelledDate, OrderStatus } = req.body;
@@ -306,7 +390,7 @@ app.post("/CancelOrder", async (req, res) => {
 
 
 // request for orders from database 
-app.get("/Order/:Username", async (req, res) => {
+app.get("/Order/:Username", authMiddleware, async (req, res) => {
     const db = client.db(dbName);
     const collection = db.collection("Userdata");
     const user = await collection.findOne({ Username: req.params.Username });
@@ -381,7 +465,6 @@ app.post("/AddAddress", async (req, res) => {
         return res.send({ success: false, message: "Error Occured" });
     }
 });
-console.log("Hello Welcome To Flipkart Website!!!")
 // DELETE /api/address/:id
 app.delete('/api/address/:id', async (req, res) => {
     const { id } = req.params;
@@ -452,6 +535,15 @@ app.post('/checkout', async (req, res) => {
     }
 });
 
+app.post("/logout", (req, res) => {
+    res.clearCookie("token", {
+        httpOnly: true,
+        sameSite: "none",
+        secure: process.env.NODE_ENV === "production"
+    });
+
+    return res.json({ success: true });
+});
 
 app.all('*', (req, res) => {
     res.status(404).json({ success: false, message: `Route ${req.method} ${req.originalUrl} not found` });
