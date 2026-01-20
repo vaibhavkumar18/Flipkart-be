@@ -22,7 +22,7 @@ const cookieOptions = {
 dotenv.config();
 
 
-const url = process.env.MONGO_URI;
+const url = process.env.MONGODB_URI;
 
 
 if (!url) {
