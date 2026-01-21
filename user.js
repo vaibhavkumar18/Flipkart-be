@@ -253,7 +253,7 @@ app.post("/login", async (req, res) => {
             Orders: user.Orders
         };
 
-        res.cookie("token", token, cookieOptions);
+        res.cookie("token", token);
 
 
         return res.status(200).json({
@@ -338,7 +338,7 @@ app.post("/signup", async (req, res) => {
             { expiresIn: "7d" }
         );
 
-        res.cookie("token", token, cookieOptions);
+        res.cookie("token", token);
 
         return res.status(201).json({
             success: true,
