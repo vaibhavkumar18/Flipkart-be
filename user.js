@@ -12,11 +12,9 @@ const cookieParser = require("cookie-parser");
 const isProd = process.env.NODE_ENV === "production";
 
 const cookieOptions = {
-    httpOnly: true,
-    secure: isProd,              // true in prod, false local
-    sameSite: isProd ? "none" : "lax",
     maxAge: 7 * 24 * 60 * 60 * 1000
 };
+
 
 
 dotenv.config();
@@ -115,26 +113,62 @@ app.post('/', async (req, res) => {
 })
 
 app.post("/add-To-Cart", authMiddleware, async (req, res) => {
-    const db = client.db(dbName);
-    const collection = db.collection("Userdata");
-    const { username, productId, name, price, productImg, quantity } = req.body;
-    const cartItem = { productId, name, price, productImg, quantity };
-    const result = await collection.updateOne(
-        { Username: username },
-        { $push: { addToCart: cartItem } }
-    );
-    if (result.modifiedCount > 0) {
-        return res.json({ message: "Item added to cart", success: true });
-    } else {
-        return res.json({ message: "User not found", success: false });
-    }
+    try {
+        const db = client.db(dbName);
+        const collection = db.collection("Userdata");
 
+        const { productId, name, price, productImg } = req.body;
+        const userId = ObjectId.createFromHexString(req.user.id);
+
+
+        // 1️⃣ Check if product already exists
+        const user = await collection.findOne({
+            _id: userId,
+            "addToCart.productId": productId
+        });
+
+        if (user) {
+            // 2️⃣ Product exists → increase quantity
+            await collection.updateOne(
+                { _id: userId, "addToCart.productId": productId },
+                { $inc: { "addToCart.$.quantity": 1 } }
+            );
+        } else {
+            // 3️⃣ Product not exists → push new
+            await collection.updateOne(
+                { _id: userId },
+                {
+                    $push: {
+                        addToCart: {
+                            productId,
+                            name,
+                            price,
+                            productImg,
+                            quantity: 1
+                        }
+                    }
+                }
+            );
+        }
+
+        res.json({ success: true });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false });
+    }
 });
 
-app.get("/CartPage/:Username", authMiddleware, async (req, res) => {
+
+
+app.get("/CartPage", authMiddleware, async (req, res) => {
     const db = client.db(dbName);
     const collection = db.collection("Userdata");
-    const user = await collection.findOne({ Username: req.params.Username });
+    const userId = ObjectId.createFromHexString(req.user.id);
+    const user = await collection.findOne({
+        _id: userId,
+    });
+    // const user = await collection.findOne({ Username: req.params.Username });
     if (user) {
         return res.json(user.addToCart);
     } else {
@@ -193,6 +227,7 @@ app.post("/login", async (req, res) => {
         const isPasswordMatch = await bcrypt.compare(password, user.Password);
 
         if (!isPasswordMatch) {
+            alert("Email/Password are incorrect!!!!");
             return res.status(401).json({
                 success: false,
                 message: "Invalid credentials"
@@ -205,7 +240,6 @@ app.post("/login", async (req, res) => {
             process.env.JWT_SECRET,
             { expiresIn: "7d" }
         );
-
         // 4. Send safe user object
         const userToSend = {
             _id: user._id.toString(),
@@ -230,6 +264,7 @@ app.post("/login", async (req, res) => {
 
     } catch (error) {
         console.error("Error during login:", error);
+        alert("Please try again later!!!")
         return res.status(500).json({
             success: false,
             message: "Internal Server Error"
@@ -313,6 +348,7 @@ app.post("/signup", async (req, res) => {
 
     } catch (error) {
         console.error("Signup error:", error);
+        alert("Please try again later!!!!")
         return res.status(500).json({
             success: false,
             message: "Server error"
@@ -326,7 +362,7 @@ app.post('/my-profile', authMiddleware, async (req, res) => {
     const collection = db.collection('Userdata');
     const { Username, Name, Email, Password, id, addToCart } = req.body;
     const Usersdata = { Username, Name, Email, Password, id, addToCart };
-    console.log(Usersdata)
+
     const user = await collection.findOne({ Email: Email });
     if (user) {
         console.log("This email already exist!!!")
@@ -342,10 +378,15 @@ app.post('/my-profile', authMiddleware, async (req, res) => {
 app.post("/Order", authMiddleware, async (req, res) => {
     const db = client.db(dbName);
     const collection = db.collection("Userdata");
-    const { username, OrderId, Address, TotalAmount, ProductData, Name, Email, Phone_number, BaseAmount, CashHandlingCharge, DeliveryCharge, Tax, DeliveredDate, OrderedDate, CancelledDate, OrderStatus } = req.body;
-    const order = { OrderId, Address, TotalAmount, ProductData, Name, Email, Phone_number, BaseAmount, CashHandlingCharge, DeliveryCharge, Tax, DeliveredDate, OrderedDate, CancelledDate, OrderStatus };
+
+    const { OrderId, Address, TotalAmount, ProductData, Phone_number, BaseAmount, CashHandlingCharge, DeliveryCharge, Tax, DeliveredDate, OrderedDate, CancelledDate, OrderStatus } = req.body;
+
+    const order = { OrderId, Address, TotalAmount, ProductData, Phone_number, BaseAmount, CashHandlingCharge, DeliveryCharge, Tax, DeliveredDate, OrderedDate, CancelledDate, OrderStatus };
+
+    const userId = ObjectId.createFromHexString(req.user.id);
+
     const result = await collection.updateOne(
-        { Username: username },
+        { _id: userId },
         { $push: { Orders: order } }
     );
     if (result.modifiedCount > 0) {
@@ -390,60 +431,65 @@ app.post("/CancelOrder", async (req, res) => {
 
 
 // request for orders from database 
-app.get("/Order/:Username", authMiddleware, async (req, res) => {
+app.get("/Order", authMiddleware, async (req, res) => {
     const db = client.db(dbName);
     const collection = db.collection("Userdata");
-    const user = await collection.findOne({ Username: req.params.Username });
+    const userId = ObjectId.createFromHexString(req.user.id);
+    const user = await collection.findOne({
+        _id: userId,
+    });
     if (user) {
-        return res.json(user.addToCart);
+        return res.json(user.Orders);
     } else {
         return res.status(404).json({ message: "User not found" });
     }
 });
 
 // update profile of a user 
-app.post("/updateprofile", async (req, res) => {
-    const db = client.db(dbName);
-    const collection = db.collection('Userdata');
-    const { Name, Email, Gender, Phone_Number, OldEmail } = req.body;
+app.post("/updateprofile", authMiddleware, async (req, res) => {
+    try {
+        const db = client.db(dbName);
+        const collection = db.collection("Userdata");
 
-    // Make sure the required fields are not empty
-    if (!Email || !Name || !Phone_Number) {
-        return res.send({ success: false, message: "All fields are required!" });
-    }
+        const { Name, Email, Gender, Phone_Number } = req.body;
 
-    // If the email is being updated, check if the new email already exists in the database
-    let emailExists = false;
-    if (Email !== OldEmail) {  // Check if the email is different from the old one
-        const emailCheck = await collection.findOne({ Email: Email });
-        if (emailCheck) {
-            emailExists = true;  // Set emailExists to true if the email already exists
+        if (!Name || !Email || !Phone_Number) {
+            return res.json({ success: false, message: "All fields are required" });
         }
-    }
 
-    // If the email is already in use, return an error
-    if (emailExists) {
-        return res.send({ success: false, message: "This email already exists!" });
-    }
+        const userId = ObjectId.createFromHexString(req.user.id);
 
-    // Update the user profile (including Email, Gender, Name, Phone_Number)
-    const result = await collection.updateOne(
-        { Email: OldEmail }, // Use the old email to find the user
-        {
-            $set: {
-                Name,
-                Gender,
-                Phone_Number,
-                Email, // Update email only if it's changed
-            },
+        // 🔒 Check if email is already used by SOME OTHER user
+        const emailExists = await collection.findOne({
+            Email,
+            _id: { $ne: userId }
+        });
+
+        if (emailExists) {
+            return res.json({ success: false, message: "This email already exists!" });
         }
-    );
 
-    if (result.modifiedCount > 0) {
-        console.log(result)
-        return res.send({ success: true, message: "Profile updated successfully" });
-    } else {
-        return res.send({ success: false, message: "No changes detected or user not found" });
+        const result = await collection.updateOne(
+            { _id: userId },
+            {
+                $set: {
+                    Name,
+                    Email,
+                    Gender,
+                    Phone_Number
+                }
+            }
+        );
+
+        if (result.modifiedCount > 0) {
+            return res.json({ success: true, message: "Profile updated successfully" });
+        }
+
+        return res.json({ success: true, message: "No changes detected" });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false });
     }
 });
 
@@ -535,12 +581,8 @@ app.post('/checkout', async (req, res) => {
     }
 });
 
-app.post("/logout", (req, res) => {
-    res.clearCookie("token", {
-        httpOnly: true,
-        sameSite: "none",
-        secure: process.env.NODE_ENV === "production"
-    });
+app.post("/logout", authMiddleware, (req, res) => {
+    res.clearCookie("token");
 
     return res.json({ success: true });
 });
