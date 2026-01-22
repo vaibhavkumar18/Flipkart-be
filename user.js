@@ -264,7 +264,6 @@ app.post("/login", async (req, res) => {
 
     } catch (error) {
         console.error("Error during login:", error);
-        alert("Please try again later!!!")
         return res.status(500).json({
             success: false,
             message: "Internal Server Error"
@@ -348,7 +347,6 @@ app.post("/signup", async (req, res) => {
 
     } catch (error) {
         console.error("Signup error:", error);
-        alert("Please try again later!!!!")
         return res.status(500).json({
             success: false,
             message: "Server error"
@@ -365,11 +363,9 @@ app.post('/my-profile', authMiddleware, async (req, res) => {
 
     const user = await collection.findOne({ Email: Email });
     if (user) {
-        console.log("This email already exist!!!")
         return res.send({ success: false, message: "Email already exists" });
     } else {
         const result = await collection.insertOne(Usersdata);
-        console.log("result", result)
         return res.send({ success: true, message: "Signup successful", data: result });
     }
 });
@@ -569,9 +565,6 @@ app.post('/checkout', async (req, res) => {
                     }
                 }
             );
-
-            console.log(`productId: ${item.productId}, quantity: ${item.quantity}`);
-            console.log("Matched:", result.matchedCount, "Modified:", result.modifiedCount);
         }
 
         res.status(200).json({ message: "Cart updated successfully" });

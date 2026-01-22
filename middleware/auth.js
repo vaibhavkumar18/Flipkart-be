@@ -9,7 +9,6 @@ const authMiddleware = (req, res, next) => {
   console.log("TOKEN IN MIDDLEWARE:", token);
 
   if (!token) {
-    alert("Please Login/Signup!!!!")
     return res.status(401).json({ message: "Unauthorized" });
   }
 
