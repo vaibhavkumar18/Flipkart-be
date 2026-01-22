@@ -71,7 +71,7 @@ app.get("/api/user/profile", authMiddleware, async (req, res) => {
 
     try {
         const user = await collection.findOne(
-            { _id: new ObjectId(req.user.id) },
+            { _id: ObjectId.createFromHexString(req.user.id) },
             { projection: { Password: 0 } }
         );
 
