@@ -587,7 +587,11 @@ app.post('/checkout', async (req, res) => {
 });
 
 app.post("/logout", authMiddleware, (req, res) => {
-    res.clearCookie("token");
+    res.clearCookie("token", {
+        httpOnly: true,
+        secure: true,
+        sameSite: "None"
+    });
 
     return res.json({ success: true });
 });
